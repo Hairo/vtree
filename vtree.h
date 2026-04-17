@@ -104,6 +104,7 @@ typedef struct {
     bool remember_dirs;  // save pane paths on exit and restore on next launch
     bool exec_scripts;   // allow executing .sh files (experimental)
     bool single_pane;    // show only one full-width pane instead of the split view
+    bool tint_icons;     // tint file-list icons to match their row's theme colour
     int  rotation;       // display rotation: 0=none, 1=90°CW, 2=180°, 3=270°CW
 } AppConfig;
 

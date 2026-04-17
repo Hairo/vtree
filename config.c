@@ -206,6 +206,7 @@ void load_config() {
     cfg.remember_dirs = false;
     cfg.exec_scripts  = false;
     cfg.single_pane   = false;
+    cfg.tint_icons    = true;
     cfg.rotation      = 0;
 
     // Default theme = built-in Dark fallback (overwritten below if file found)
@@ -307,6 +308,7 @@ void load_config() {
         else if (strcmp(k, "RememberDirs") == 0) cfg.remember_dirs = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "ExecScripts")  == 0) cfg.exec_scripts  = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "SinglePane")   == 0) cfg.single_pane   = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
+        else if (strcmp(k, "TintIcons")    == 0) cfg.tint_icons    = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "Rotation")     == 0) { int r = atoi(v); cfg.rotation = (r >= 0 && r <= 3) ? r : 0; }
         // [Paths]
         else if (strcmp(k, "StartDirectoryLeft")  == 0) strcpy(cfg.start_left,        v);
@@ -391,6 +393,7 @@ void save_config() {
     fprintf(f, "RememberDirs=%s\n", cfg.remember_dirs ? "true" : "false");
     fprintf(f, "ExecScripts=%s\n",  cfg.exec_scripts  ? "true" : "false");
     fprintf(f, "SinglePane=%s\n",   cfg.single_pane   ? "true" : "false");
+    fprintf(f, "TintIcons=%s\n",    cfg.tint_icons    ? "true" : "false");
 
     fprintf(f, "\n[Display]\n");
     // Always save physical dims so that Rotation= can be applied correctly on next load

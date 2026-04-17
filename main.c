@@ -454,8 +454,9 @@ static SettingDef general_defs[] = {
     { "Close",                STYPE_ACTION,NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
 };
 static SettingDef display_defs[] = {
-    { "Theme Preset",  STYPE_PRESET, NULL,                  NULL, NULL, NULL, 0,  0,    0   },
-    { "Font File",     STYPE_FONT,   NULL,                  NULL, NULL, NULL, 0,  0,    0   },
+    { "Theme Preset",              STYPE_PRESET, NULL,                  NULL, NULL, NULL, 0, 0,    0    },
+    { "Icons Follow Theme Colours",STYPE_BOOL,   NULL, &cfg.tint_icons,  NULL, NULL, 0, 0,    0    },
+    { "Font File",                 STYPE_FONT,   NULL,                  NULL, NULL, NULL, 0, 0,    0   },
     { "Screen Width",  STYPE_INT,    &cfg.screen_w,         NULL, NULL, NULL, 16, 320,  1920 },
     { "Screen Height", STYPE_INT,    &cfg.screen_h,         NULL, NULL, NULL, 16, 240,  1080 },
     { "Font: List",    STYPE_INT,    &cfg.font_size_list,   NULL, NULL, NULL, 1,  8,    48   },
@@ -776,7 +777,7 @@ static void draw_settings() {
             SDL_SetRenderDrawColor(renderer, cfg.theme.alt_bg.r, cfg.theme.alt_bg.g, cfg.theme.alt_bg.b, 255);
         }
         SDL_RenderFillRect(renderer, &tr);
-        SDL_Color tc = (t == settings_tab) ? cfg.theme.marked : cfg.theme.text_disabled;
+        SDL_Color tc = (t == settings_tab) ? cfg.theme.highlight_text : cfg.theme.text_disabled;
         int tw_px = 0;
         if (font_footer) TTF_SizeText(font_footer, settings_tab_labels[t], &tw_px, NULL);
         int tx = t * tab_w + (tab_w - tw_px) / 2;
@@ -811,7 +812,7 @@ static void draw_settings() {
         // Greyed label for path rows when RememberDirs is on
         bool greyed = (d->type == STYPE_PATH && cfg.remember_dirs);
         SDL_Color lc = greyed ? cfg.theme.text_disabled
-                              : (i == settings_index) ? cfg.theme.marked : cfg.theme.text;
+                              : (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text;
         draw_txt(font_menu, d->label, cl, y, lc);
 
         // Value column
@@ -846,7 +847,7 @@ static void draw_settings() {
         } else if (d->type == STYPE_KEYBIND && d->btn_ptr) {
             if (settings_listening && settings_listen_target == d->btn_ptr) {
                 snprintf(val, sizeof(val), "Press button...");
-                vc = cfg.theme.marked;
+                vc = cfg.theme.highlight_text;
             } else {
                 snprintf(val, sizeof(val), "%s", btn_label(*d->btn_ptr));
             }
@@ -857,11 +858,11 @@ static void draw_settings() {
             if (plen > 28) { snprintf(val, sizeof(val), "...%s", p + (plen - 28)); }
             else            { snprintf(val, sizeof(val), "%s", p); }
             vc = greyed ? cfg.theme.text_disabled
-                        : (i == settings_index) ? cfg.theme.marked : cfg.theme.text;
+                        : (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text;
         } else {
             // STYPE_ACTION
             snprintf(val, sizeof(val), "[ %s ]", d->label);
-            vc = (i == settings_index) ? cfg.theme.marked : cfg.theme.text_disabled;
+            vc = (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text_disabled;
         }
 
         if (arrows && i == settings_index) {
@@ -916,7 +917,7 @@ static void draw_settings() {
                 SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 255);
                 SDL_Rect row = {mx+2, iy-2, mw-4, spc}; SDL_RenderFillRect(renderer, &row);
             }
-            SDL_Color lc = (i == save_prompt_sel) ? cfg.theme.marked : cfg.theme.text;
+            SDL_Color lc = (i == save_prompt_sel) ? cfg.theme.highlight_text : cfg.theme.text;
             draw_txt(font_menu, opts[i], mx + 16, iy + (spc - cfg.font_size_menu) / 2, lc);
         }
         SDL_RenderSetClipRect(renderer, NULL);
@@ -932,7 +933,7 @@ static void draw_settings() {
         SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 220);
         SDL_Rect tr = {tx, ty, tw + 20, th}; SDL_RenderFillRect(renderer, &tr);
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-        draw_txt(font_menu, msg, tx + 10, ty + (th - cfg.font_size_menu) / 2, cfg.theme.marked);
+        draw_txt(font_menu, msg, tx + 10, ty + (th - cfg.font_size_menu) / 2, cfg.theme.highlight_text);
     }
 }
 
@@ -2306,12 +2307,6 @@ int main(int argc, char *argv[]) {
                 bool is_selected = (p == active_pane && i == s->selected_index);
                 bool in_clip = (clip.op != OP_NONE) && file_in_clipboard(p, i);
                 bool is_cut  = in_clip && (clip.op == OP_CUT);
-                if (icn) {
-                    SDL_Rect ir={x+5, iy+ICO_PAD, ICO_SIZE, ICO_SIZE};
-                    SDL_SetTextureAlphaMod(icn, is_cut ? 100 : 255);
-                    SDL_RenderCopy(renderer,icn,NULL,&ir);
-                    SDL_SetTextureAlphaMod(icn, 255);
-                }
                 SDL_Color name_col;
                 if (is_cut)
                     name_col = cfg.theme.text_disabled;
@@ -2319,6 +2314,15 @@ int main(int argc, char *argv[]) {
                     name_col = is_selected ? cfg.theme.highlight_text : cfg.theme.link;
                 else
                     name_col = s->files[i].marked ? cfg.theme.marked : (is_selected ? cfg.theme.highlight_text : (s->files[i].is_link ? cfg.theme.link : cfg.theme.text));
+                if (icn) {
+                    SDL_Rect ir={x+5, iy+ICO_PAD, ICO_SIZE, ICO_SIZE};
+                    SDL_SetTextureAlphaMod(icn, is_cut ? 100 : 255);
+                    if (cfg.tint_icons)
+                        SDL_SetTextureColorMod(icn, name_col.r, name_col.g, name_col.b);
+                    SDL_RenderCopy(renderer,icn,NULL,&ir);
+                    SDL_SetTextureAlphaMod(icn, 255);
+                    SDL_SetTextureColorMod(icn, 255, 255, 255);
+                }
                 draw_txt(font_list, s->files[i].name, x+ICO_SIZE+10, iy+(item_h-cfg.font_size_list)/2, name_col);
             }
             SDL_RenderSetClipRect(renderer, NULL);
