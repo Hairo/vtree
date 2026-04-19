@@ -33,6 +33,7 @@ typedef struct {
     int      cursor;        // insertion point (0..len), caret position
     bool     insert_mode;   // true = insert (default), false = overwrite
     bool     kb_visible;    // keyboard grid visible (can be toggled)
+    int      scroll_x;      // horizontal pixel scroll offset for input field
     int      row, col;      // grid focus: row 0..OSK_CHAR_ROWS-1 or OSK_CHAR_ROWS (action)
     char     orig_name[256];
     char     dir_path[MAX_PATH];
@@ -85,6 +86,7 @@ typedef struct {
     // Explorer / global keys
     SDL_GameControllerButton k_confirm, k_back, k_menu, k_mark;
     SDL_GameControllerButton k_pgup, k_pgdn;   // page up / page down in file manager + viewers
+    SDL_GameControllerButton k_menu2;          // system menu key (Settings/About/Exit) in two-menu mode
     // OSK-specific keys (independent, fully rebindable)
     SDL_GameControllerButton osk_k_type;    // press selected key       (default: a)
     SDL_GameControllerButton osk_k_bksp;   // backspace at cursor      (default: x)
@@ -104,6 +106,7 @@ typedef struct {
     bool remember_dirs;  // save pane paths on exit and restore on next launch
     bool exec_scripts;   // allow executing .sh files (experimental)
     bool single_pane;    // show only one full-width pane instead of the split view
+    bool two_menu_mode;  // k_menu goes to file-ops directly; k_menu2 opens system menu
     bool tint_icons;     // tint file-list icons to match their row's theme colour
     int  rotation;       // display rotation: 0=none, 1=90°CW, 2=180°, 3=270°CW
     char language_name[64];  // display name of the active language (e.g. "English")

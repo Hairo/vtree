@@ -221,6 +221,8 @@ void load_config() {
     cfg.k_mark    = SDL_CONTROLLER_BUTTON_Y;
     cfg.k_pgup    = SDL_CONTROLLER_BUTTON_LEFTSHOULDER;
     cfg.k_pgdn    = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER;
+    cfg.k_menu2   = SDL_CONTROLLER_BUTTON_GUIDE;
+    cfg.two_menu_mode = false;
 
     // OSK keys
     cfg.osk_k_type   = SDL_CONTROLLER_BUTTON_A;
@@ -310,6 +312,7 @@ void load_config() {
         else if (strcmp(k, "RememberDirs") == 0) cfg.remember_dirs = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "ExecScripts")  == 0) cfg.exec_scripts  = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "SinglePane")   == 0) cfg.single_pane   = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
+        else if (strcmp(k, "TwoMenuMode")  == 0) cfg.two_menu_mode = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "TintIcons")    == 0) cfg.tint_icons    = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "Rotation")     == 0) { int r = atoi(v); cfg.rotation = (r >= 0 && r <= 3) ? r : 0; }
         else if (strcmp(k, "Language")     == 0) strncpy(cfg.language_name, v, sizeof(cfg.language_name) - 1);
@@ -321,6 +324,7 @@ void load_config() {
         else if (strcmp(k, "KeyConfirm") == 0) cfg.k_confirm = SDL_GameControllerGetButtonFromString(v);
         else if (strcmp(k, "KeyBack")    == 0) cfg.k_back    = SDL_GameControllerGetButtonFromString(v);
         else if (strcmp(k, "KeyMenu")    == 0) cfg.k_menu    = SDL_GameControllerGetButtonFromString(v);
+        else if (strcmp(k, "KeyMenu2")   == 0) cfg.k_menu2   = SDL_GameControllerGetButtonFromString(v);
         else if (strcmp(k, "KeyMark")    == 0) cfg.k_mark    = SDL_GameControllerGetButtonFromString(v);
         else if (strcmp(k, "KeyPgUp")    == 0) cfg.k_pgup    = SDL_GameControllerGetButtonFromString(v);
         else if (strcmp(k, "KeyPgDn")    == 0) cfg.k_pgdn    = SDL_GameControllerGetButtonFromString(v);
@@ -396,6 +400,7 @@ void save_config() {
     fprintf(f, "RememberDirs=%s\n", cfg.remember_dirs ? "true" : "false");
     fprintf(f, "ExecScripts=%s\n",  cfg.exec_scripts  ? "true" : "false");
     fprintf(f, "SinglePane=%s\n",   cfg.single_pane   ? "true" : "false");
+    fprintf(f, "TwoMenuMode=%s\n", cfg.two_menu_mode ? "true" : "false");
     fprintf(f, "TintIcons=%s\n",    cfg.tint_icons    ? "true" : "false");
     fprintf(f, "Language=%s\n",    cfg.language_name);
 
@@ -425,6 +430,7 @@ void save_config() {
     s = SDL_GameControllerGetStringForButton(cfg.k_confirm); fprintf(f, "KeyConfirm=%s\n", s ? s : "a");
     s = SDL_GameControllerGetStringForButton(cfg.k_back);    fprintf(f, "KeyBack=%s\n",    s ? s : "b");
     s = SDL_GameControllerGetStringForButton(cfg.k_menu);    fprintf(f, "KeyMenu=%s\n",    s ? s : "guide");
+    s = SDL_GameControllerGetStringForButton(cfg.k_menu2);   fprintf(f, "KeyMenu2=%s\n",   s ? s : "guide");
     s = SDL_GameControllerGetStringForButton(cfg.k_mark);    fprintf(f, "KeyMark=%s\n",    s ? s : "y");
     s = SDL_GameControllerGetStringForButton(cfg.k_pgup);    fprintf(f, "KeyPgUp=%s\n",    s ? s : "leftshoulder");
     s = SDL_GameControllerGetStringForButton(cfg.k_pgdn);    fprintf(f, "KeyPgDn=%s\n",    s ? s : "rightshoulder");

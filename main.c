@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 // Version
 // ---------------------------------------------------------------------------
-#define VTREE_VERSION "0.9"
+#define VTREE_VERSION "1.0"
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -53,7 +53,7 @@ bool      paste_conflict_active  = false;
 int       paste_conflict_sel     = 0;   // selected option in conflict modal
 int       paste_conflict_count   = 0;   // how many clipboard items conflict
 bool      paste_dest_active      = false;
-int       paste_dest_sel         = 0;   // 0 = this pane, 1 = other pane
+int       paste_dest_sel         = 0;   // 0 = left pane, 1 = right pane
 int       paste_dest_pane        = 0;   // resolved destination pane index
 static bool do_symlink_after_dest = false;  // dest chooser is for symlink, not paste
 int       settings_index = 0;
@@ -448,6 +448,7 @@ static SettingDef general_defs[] = {
     { "Settings_ShowHidden",   STYPE_BOOL,  NULL, &cfg.show_hidden,   NULL, NULL,           0, 0, 0, NULL },
     { "Settings_RememberDirs", STYPE_BOOL,  NULL, &cfg.remember_dirs, NULL, NULL,           0, 0, 0, NULL },
     { "Settings_SinglePane",   STYPE_BOOL,  NULL, &cfg.single_pane,   NULL, NULL,           0, 0, 0, NULL },
+    { "Settings_TwoMenuMode",  STYPE_BOOL,  NULL, &cfg.two_menu_mode, NULL, NULL,           0, 0, 0, NULL },
     { "Settings_StartLeft",    STYPE_PATH,  NULL, NULL, NULL, cfg.start_left,               0, 0, 0, NULL },
     { "Settings_StartRight",   STYPE_PATH,  NULL, NULL, NULL, cfg.start_right,              0, 0, 0, NULL },
     { "Settings_ExecScripts",  STYPE_BOOL,  NULL, &cfg.exec_scripts,  NULL, NULL,           0, 0, 0, NULL },
@@ -473,6 +474,7 @@ static SettingDef display_defs[] = {
 typedef struct {
     SDL_GameControllerButton k_confirm, k_back, k_menu, k_mark;
     SDL_GameControllerButton k_pgup, k_pgdn;
+    SDL_GameControllerButton k_menu2;
     SDL_GameControllerButton osk_k_type, osk_k_bksp, osk_k_shift;
     SDL_GameControllerButton osk_k_cancel, osk_k_toggle, osk_k_ins;
 } PendingKeys;
@@ -485,6 +487,7 @@ static SDL_GameControllerButton *pending_general_ptrs[] = {
     &pending_keys.k_confirm, &pending_keys.k_back,
     &pending_keys.k_menu,    &pending_keys.k_mark,
     &pending_keys.k_pgup,    &pending_keys.k_pgdn,
+    &pending_keys.k_menu2,
 };
 static SDL_GameControllerButton *pending_osk_ptrs[] = {
     &pending_keys.osk_k_type,   &pending_keys.osk_k_bksp,
@@ -510,6 +513,7 @@ static void pending_keys_from_cfg(void) {
     pending_keys.k_mark       = cfg.k_mark;
     pending_keys.k_pgup       = cfg.k_pgup;
     pending_keys.k_pgdn       = cfg.k_pgdn;
+    pending_keys.k_menu2      = cfg.k_menu2;
     pending_keys.osk_k_type   = cfg.osk_k_type;
     pending_keys.osk_k_bksp   = cfg.osk_k_bksp;
     pending_keys.osk_k_shift  = cfg.osk_k_shift;
@@ -524,6 +528,7 @@ static void pending_keys_to_cfg(void) {
     cfg.k_mark       = pending_keys.k_mark;
     cfg.k_pgup       = pending_keys.k_pgup;
     cfg.k_pgdn       = pending_keys.k_pgdn;
+    cfg.k_menu2      = pending_keys.k_menu2;
     cfg.osk_k_type   = pending_keys.osk_k_type;
     cfg.osk_k_bksp   = pending_keys.osk_k_bksp;
     cfg.osk_k_shift  = pending_keys.osk_k_shift;
@@ -536,6 +541,7 @@ static SettingDef keys_defs[] = {
     { "Settings_KeyConfirm", STYPE_KEYBIND, NULL, NULL, &pending_keys.k_confirm,    NULL, 0, 0, 0 },
     { "Settings_KeyBack",    STYPE_KEYBIND, NULL, NULL, &pending_keys.k_back,       NULL, 0, 0, 0 },
     { "Settings_KeyMenu",    STYPE_KEYBIND, NULL, NULL, &pending_keys.k_menu,       NULL, 0, 0, 0 },
+    { "Settings_KeyMenu2",   STYPE_KEYBIND, NULL, NULL, &pending_keys.k_menu2,      NULL, 0, 0, 0 },
     { "Settings_KeyMark",    STYPE_KEYBIND, NULL, NULL, &pending_keys.k_mark,       NULL, 0, 0, 0 },
     { "Settings_KeyPageUp",  STYPE_KEYBIND, NULL, NULL, &pending_keys.k_pgup,       NULL, 0, 0, 0 },
     { "Settings_KeyPageDown",STYPE_KEYBIND, NULL, NULL, &pending_keys.k_pgdn,       NULL, 0, 0, 0 },
@@ -656,6 +662,53 @@ static void reload_fonts() {
               cfg.font_size_footer, cfg.font_size_menu, cfg.font_size_hex);
 }
 
+// Shorten a path to fit within max_w pixels by stripping leading components
+// and prefixing each stripped component with "../".
+// Result written into out (size out_size). Falls back to as-short-as-possible.
+static void shorten_path(const char *path, char *out, size_t out_size,
+                         TTF_Font *font, int max_w) {
+    if (!font) { strncpy(out, path, out_size - 1); out[out_size - 1] = '\0'; return; }
+
+    // Try full path first
+    int pw = 0;
+    TTF_SizeUTF8(font, path, &pw, NULL);
+    if (pw <= max_w) { strncpy(out, path, out_size - 1); out[out_size - 1] = '\0'; return; }
+
+    // Walk forward stripping one component at a time from the left
+    const char *cur = path;
+    if (*cur == '/') cur++;        // skip leading slash
+    int stripped = 0;
+
+    while (*cur) {
+        const char *slash = strchr(cur, '/');
+        if (!slash) break;         // only one component left — can't strip further
+        stripped++;
+        cur = slash + 1;
+
+        // Build candidate: stripped × "../" + remaining
+        char candidate[MAX_PATH * 2];
+        int off = 0;
+        for (int i = 0; i < stripped && off < (int)sizeof(candidate) - 4; i++) {
+            candidate[off++] = '.'; candidate[off++] = '.'; candidate[off++] = '/';
+        }
+        strncpy(candidate + off, cur, sizeof(candidate) - (size_t)off - 1);
+        candidate[sizeof(candidate) - 1] = '\0';
+
+        TTF_SizeUTF8(font, candidate, &pw, NULL);
+        if (pw <= max_w) { strncpy(out, candidate, out_size - 1); out[out_size - 1] = '\0'; return; }
+    }
+
+    // Nothing fits — return shortest candidate (caller clips visually)
+    char candidate[MAX_PATH * 2];
+    int off = 0;
+    for (int i = 0; i < stripped && off < (int)sizeof(candidate) - 4; i++) {
+        candidate[off++] = '.'; candidate[off++] = '.'; candidate[off++] = '/';
+    }
+    strncpy(candidate + off, cur, sizeof(candidate) - (size_t)off - 1);
+    candidate[sizeof(candidate) - 1] = '\0';
+    strncpy(out, candidate, out_size - 1); out[out_size - 1] = '\0';
+}
+
 // ---------------------------------------------------------------------------
 // Settings helpers + render
 // ---------------------------------------------------------------------------
@@ -668,6 +721,12 @@ static void settings_adjust(int dir) {
         *d->int_ptr = SDL_clamp(*d->int_ptr + dir * d->step, d->lo, d->hi);
         vtree_log("Setting '%s': %d -> %d\n", d->label, old, *d->int_ptr);
         settings_dirty = true;
+        if (*d->int_ptr != old &&
+            (d->int_ptr == &cfg.font_size_list   ||
+             d->int_ptr == &cfg.font_size_header  ||
+             d->int_ptr == &cfg.font_size_footer  ||
+             d->int_ptr == &cfg.font_size_menu))
+            reload_fonts();
     } else if (d->type == STYPE_BOOL && d->bool_ptr) {
         *d->bool_ptr = !(*d->bool_ptr);
         vtree_log("Setting '%s': %s\n", d->label, *d->bool_ptr ? "true" : "false");
@@ -797,11 +856,11 @@ static void draw_settings() {
     SDL_RenderClear(renderer);
 
     int hh  = cfg.font_size_header + 12;
-    int th  = cfg.font_size_footer + 10;   // tab strip height
-    int ih  = cfg.font_size_menu + 10;
+    int th  = cfg.font_size_menu + 10;     // tab strip height
+    int ih  = cfg.font_size_list + 10;
     int cl  = 20;
     int cv  = cfg.screen_w / 2 + 20;
-    int aw  = cfg.font_size_menu;
+    int aw  = cfg.font_size_list;
     int fh  = cfg.font_size_footer + 16;
     int rows_y0 = hh + th;                 // rows start below header + tab strip
 
@@ -823,9 +882,9 @@ static void draw_settings() {
         SDL_Color tc = (t == settings_tab) ? cfg.theme.highlight_text : cfg.theme.text_disabled;
         int tw_px = 0;
         const char *tab_lbl = tr(settings_tab_labels[t]);
-        if (font_footer) TTF_SizeText(font_footer, tab_lbl, &tw_px, NULL);
+        if (font_menu) TTF_SizeText(font_menu, tab_lbl, &tw_px, NULL);
         int tx = t * tab_w + (tab_w - tw_px) / 2;
-        draw_txt_clipped(font_footer, tab_lbl, tx, hh + (th - cfg.font_size_footer) / 2, tab_w - 4, tc);
+        draw_txt_clipped(font_menu, tab_lbl, tx, hh + (th - cfg.font_size_menu) / 2, tab_w - 4, tc);
     }
     // Tab strip bottom border
     SDL_SetRenderDrawColor(renderer, cfg.theme.text_disabled.r, cfg.theme.text_disabled.g, cfg.theme.text_disabled.b, 255);
@@ -854,10 +913,11 @@ static void draw_settings() {
         }
 
         // Greyed label for path rows when RememberDirs is on
-        bool greyed = (d->type == STYPE_PATH && cfg.remember_dirs);
+        bool greyed = (d->type == STYPE_PATH && cfg.remember_dirs) ||
+                      (d->btn_ptr == &pending_keys.k_menu2 && !cfg.two_menu_mode);
         SDL_Color lc = greyed ? cfg.theme.text_disabled
                               : (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text;
-        draw_txt_clipped(font_menu, tr(d->label), cl, y, cv - cl - 16, lc);
+        draw_txt_clipped(font_list, tr(d->label), cl, y, cv - cl - 16, lc);
 
         // Value column
         char val[MAX_LANG_VAL_LEN] = ""; bool arrows = false;
@@ -915,12 +975,12 @@ static void draw_settings() {
 
         if (arrows && i == settings_index) {
             int vw = 0;
-            if (font_menu) TTF_SizeUTF8(font_menu, val, &vw, NULL);
-            draw_txt(font_menu, "<", cv, y, vc);
-            draw_txt_clipped(font_menu, val, cv + aw + 6, y, val_max_w - aw*2 - 12, vc);
-            draw_txt(font_menu, ">", cv + aw + 6 + vw + 6, y, vc);
+            if (font_list) TTF_SizeUTF8(font_list, val, &vw, NULL);
+            draw_txt(font_list, "<", cv, y, vc);
+            draw_txt_clipped(font_list, val, cv + aw + 6, y, val_max_w - aw*2 - 12, vc);
+            draw_txt(font_list, ">", cv + aw + 6 + vw + 6, y, vc);
         } else {
-            draw_txt_clipped(font_menu, val, cv, y, val_max_w, vc);
+            draw_txt_clipped(font_list, val, cv, y, val_max_w, vc);
         }
     }
 
@@ -941,7 +1001,7 @@ static void draw_settings() {
     // Save prompt modal
     if (settings_save_prompt) {
         int hh  = cfg.font_size_footer + 14;
-        int spc = cfg.font_size_menu + 14;
+        int spc = cfg.font_size_list + 14;
         int mw  = cfg.screen_w - 100;
         int mh  = hh + 2 * spc + 8;
         int mx  = (cfg.screen_w - mw) / 2, my = (cfg.screen_h - mh) / 2;
@@ -968,7 +1028,7 @@ static void draw_settings() {
                 SDL_Rect row = {mx+2, iy-2, mw-4, spc}; SDL_RenderFillRect(renderer, &row);
             }
             SDL_Color lc = (i == save_prompt_sel) ? cfg.theme.highlight_text : cfg.theme.text;
-            draw_txt_clipped(font_menu, opts[i], mx + 16, iy + (spc - cfg.font_size_menu) / 2, mw - 32, lc);
+            draw_txt_clipped(font_list, opts[i], mx + 16, iy + (spc - cfg.font_size_list) / 2, mw - 32, lc);
         }
         SDL_RenderSetClipRect(renderer, NULL);
     }
@@ -1403,8 +1463,13 @@ static void do_paste(PasteConflict res, int pane_idx) {
             copy_path(clip.src_paths[i], d);
         } else {
             if (rename(clip.src_paths[i], d) != 0) {
-                copy_path(clip.src_paths[i], d);
-                delete_path(clip.src_paths[i]);
+                if (errno != EXDEV) {
+                    vtree_log("[move] rename FAILED: %s -> %s (errno %d: %s)\n",
+                              clip.src_paths[i], d, errno, strerror(errno));
+                } else {
+                    copy_path(clip.src_paths[i], d);
+                    delete_path(clip.src_paths[i]);
+                }
             }
         }
     }
@@ -1444,9 +1509,9 @@ static void draw_paste_dest(void) {
     draw_txt_clipped(font_footer, do_symlink_after_dest ? tr("Paste_SymlinkDestTitle") : tr("Paste_DestTitle"),
              mx + 12, my + (hh - cfg.font_size_footer) / 2, mw - 24, cfg.theme.text_disabled);
 
-    const char *dest_labels[2] = { tr("Paste_ThisPane"), tr("Paste_OtherPane") };
+    const char *dest_labels[2] = { tr("Paste_LeftPane"), tr("Paste_RightPane") };
     for (int i = 0; i < 2; i++) {
-        int pane_i = (i == 0) ? active_pane : (1 - active_pane);
+        int pane_i = i;  // 0 = left pane, 1 = right pane
         int iy = my + hh + i * spc;
         if (i == paste_dest_sel) {
             SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 255);
@@ -1710,6 +1775,7 @@ int main(int argc, char *argv[]) {
     int  menu_selection = 0;
     int  filemenu_sel   = 0;
     bool menu_in_files  = false;
+    bool menu_is_system = false;  // true when opened via k_menu2 (Settings/About/Exit only)
     bool about_active       = false;
     bool about_r1_held      = false;  // combo state for about-screen easter egg
     bool about_dpad_up_held = false;
@@ -1772,9 +1838,17 @@ int main(int argc, char *argv[]) {
                     if (exec_error_active) { exec_error_active = false; continue; }
                     if (fileinfo_active)   { fileinfo_active   = false; continue; }
                     if (btn == cfg.k_menu) {
-                        current_mode = MODE_CONTEXT_MENU; menu_selection = 0;
-                        filemenu_sel = 0; menu_in_files = false; about_active = false;
-                        delete_confirm_active = false;
+                        current_mode = MODE_CONTEXT_MENU;
+                        about_active = false; delete_confirm_active = false;
+                        if (cfg.two_menu_mode) {
+                            menu_in_files = true; menu_is_system = false; filemenu_sel = 0;
+                        } else {
+                            menu_in_files = false; menu_is_system = false; menu_selection = 0;
+                        }
+                    } else if (cfg.two_menu_mode && btn == cfg.k_menu2) {
+                        current_mode = MODE_CONTEXT_MENU;
+                        menu_in_files = false; menu_is_system = true;
+                        menu_selection = 0; about_active = false; delete_confirm_active = false;
                     } else if (btn == cfg.k_mark) {
                         if (strcmp(s->files[s->selected_index].name, "..") != 0) {
                             s->files[s->selected_index].marked = !s->files[s->selected_index].marked;
@@ -1783,12 +1857,20 @@ int main(int argc, char *argv[]) {
                         }
                     } else if (btn == cfg.k_pgup) {
                         int item_h = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) + 6;
-                        int page   = (cfg.screen_h - cfg.font_size_header - cfg.font_size_footer - 28) / item_h;
-                        s->selected_index = SDL_max(0, s->selected_index - SDL_max(1, page));
+                        int head_h = cfg.font_size_header + 12;
+                        int foot_h = cfg.font_size_footer + 16;
+                        int page   = SDL_max(1, (cfg.screen_h - head_h - foot_h) / item_h);
+                        int new_top = SDL_max(0, s->scroll_offset - page);
+                        s->scroll_offset  = new_top;
+                        s->selected_index = SDL_min(s->file_count - 1, new_top + page - 1);
                     } else if (btn == cfg.k_pgdn) {
                         int item_h = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) + 6;
-                        int page   = (cfg.screen_h - cfg.font_size_header - cfg.font_size_footer - 28) / item_h;
-                        s->selected_index = SDL_min(s->file_count - 1, s->selected_index + SDL_max(1, page));
+                        int head_h = cfg.font_size_header + 12;
+                        int foot_h = cfg.font_size_footer + 16;
+                        int page   = SDL_max(1, (cfg.screen_h - head_h - foot_h) / item_h);
+                        int new_top = SDL_min(SDL_max(0, s->file_count - page), s->scroll_offset + page);
+                        s->scroll_offset  = new_top;
+                        s->selected_index = SDL_min(s->file_count - 1, new_top);
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                         if (s->selected_index > 0) s->selected_index--;
                         else if (s->file_count > 0) s->selected_index = s->file_count - 1;
@@ -1851,7 +1933,7 @@ int main(int argc, char *argv[]) {
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN || btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
                             paste_dest_sel = 1;
                         } else if (btn == cfg.k_confirm) {
-                            paste_dest_pane   = (paste_dest_sel == 0) ? active_pane : (1 - active_pane);
+                            paste_dest_pane   = paste_dest_sel;  // 0 = left, 1 = right
                             paste_dest_active = false;
                             if (do_symlink_after_dest) {
                                 do_symlink(paste_dest_pane);
@@ -1902,15 +1984,18 @@ int main(int argc, char *argv[]) {
                                           strcmp(s->files[s->selected_index].name, "..") == 0);
 #define DOTDOT_SKIP(sel) (dotdot_sel && ((sel)==FILEMENU_COPY||(sel)==FILEMENU_CUT|| \
                                          (sel)==FILEMENU_RENAME||(sel)==FILEMENU_DELETE))
+#define BACK_SKIP(sel)   ((sel)==FILEMENU_BACK && cfg.two_menu_mode)
                         if (btn == cfg.k_menu || btn == cfg.k_back) {
-                            menu_in_files = false; delete_confirm_active = false;
+                            if (cfg.two_menu_mode) { current_mode = MODE_EXPLORER; }
+                            else { menu_in_files = false; }
+                            delete_confirm_active = false;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                             filemenu_sel = (filemenu_sel - 1 + FILEMENU_MAX) % FILEMENU_MAX;
                             while ((filemenu_sel == FILEMENU_PASTE   && clip.op == OP_NONE) ||
                                    (filemenu_sel == FILEMENU_SYMLINK && (clip.op != OP_COPY || clip.count == 0 ||
                                        (!fs_supports_symlinks(panes[0].current_path) &&
                                         !fs_supports_symlinks(panes[1].current_path)))) ||
-                                   DOTDOT_SKIP(filemenu_sel))
+                                   DOTDOT_SKIP(filemenu_sel) || BACK_SKIP(filemenu_sel))
                                 filemenu_sel = (filemenu_sel - 1 + FILEMENU_MAX) % FILEMENU_MAX;
                             delete_confirm_active = false;
                             dpad_up_held = true; next_up_tick = now + REPEAT_DELAY;
@@ -1920,13 +2005,15 @@ int main(int argc, char *argv[]) {
                                    (filemenu_sel == FILEMENU_SYMLINK && (clip.op != OP_COPY || clip.count == 0 ||
                                        (!fs_supports_symlinks(panes[0].current_path) &&
                                         !fs_supports_symlinks(panes[1].current_path)))) ||
-                                   DOTDOT_SKIP(filemenu_sel))
+                                   DOTDOT_SKIP(filemenu_sel) || BACK_SKIP(filemenu_sel))
                                 filemenu_sel = (filemenu_sel + 1) % FILEMENU_MAX;
                             delete_confirm_active = false;
                             dpad_down_held = true; next_down_tick = now + REPEAT_DELAY;
                         } else if (btn == cfg.k_confirm) {
                             if (filemenu_sel == FILEMENU_BACK) {
-                                menu_in_files = false; delete_confirm_active = false;
+                                if (cfg.two_menu_mode) { current_mode = MODE_EXPLORER; }
+                                else { menu_in_files = false; }
+                                delete_confirm_active = false;
                             } else if (filemenu_sel == FILEMENU_COPY || filemenu_sel == FILEMENU_CUT) {
                                 clip.count = 0;
                                 clip.op = (filemenu_sel == FILEMENU_COPY) ? OP_COPY : OP_CUT;
@@ -2004,20 +2091,24 @@ int main(int argc, char *argv[]) {
                                 osk_enter_new(s->current_path, true);
                             }
                         }
-                    // ── Top-level menu ────────────────────────────────────────
+                    // ── Top-level / system menu ───────────────────────────────
                     } else {
-                        if (btn == cfg.k_menu || btn == cfg.k_back) {
-                            current_mode = MODE_EXPLORER; delete_confirm_active = false; paste_conflict_active = false;
+                        static const int sys_items[] = { TOPMENU_SETTINGS, TOPMENU_ABOUT, TOPMENU_EXIT };
+                        int top_count = menu_is_system ? 3 : TOPMENU_MAX;
+                        if (btn == cfg.k_menu || btn == cfg.k_back || btn == cfg.k_menu2) {
+                            current_mode = MODE_EXPLORER; menu_is_system = false;
+                            delete_confirm_active = false; paste_conflict_active = false;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
-                            menu_selection = (menu_selection - 1 + TOPMENU_MAX) % TOPMENU_MAX;
+                            menu_selection = (menu_selection - 1 + top_count) % top_count;
                             dpad_up_held = true; next_up_tick = now + REPEAT_DELAY;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
-                            menu_selection = (menu_selection + 1) % TOPMENU_MAX;
+                            menu_selection = (menu_selection + 1) % top_count;
                             dpad_down_held = true; next_down_tick = now + REPEAT_DELAY;
                         } else if (btn == cfg.k_confirm) {
-                            if (menu_selection == TOPMENU_FILES) {
+                            int sel = menu_is_system ? sys_items[menu_selection] : menu_selection;
+                            if (sel == TOPMENU_FILES) {
                                 menu_in_files = true; filemenu_sel = 0;
-                            } else if (menu_selection == TOPMENU_SETTINGS) {
+                            } else if (sel == TOPMENU_SETTINGS) {
                                 cfg_snapshot       = cfg;
                                 snapshot_theme_idx = current_named_theme;
                                 snapshot_font_idx  = current_font_idx;
@@ -2026,9 +2117,9 @@ int main(int argc, char *argv[]) {
                                 settings_tab = 0;
                                 settings_tab_indices[0] = settings_tab_indices[1] = settings_tab_indices[2] = 0;
                                 settings_index = 0; current_mode = MODE_SETTINGS;
-                            } else if (menu_selection == TOPMENU_ABOUT) {
+                            } else if (sel == TOPMENU_ABOUT) {
                                 about_active = true;
-                            } else if (menu_selection == TOPMENU_EXIT) {
+                            } else if (sel == TOPMENU_EXIT) {
                                 if (cfg.remember_dirs) {
                                     strncpy(cfg.start_left,  panes[0].current_path, MAX_PATH - 1);
                                     strncpy(cfg.start_right, panes[1].current_path, MAX_PATH - 1);
@@ -2320,6 +2411,9 @@ int main(int argc, char *argv[]) {
         if (current_mode == MODE_VIEW_TEXT) {
             viewer_draw(); present_frame(); continue;
         }
+        if (current_mode == MODE_OSK && osk_purpose == OSK_FOR_TEXT_EDIT) {
+            viewer_draw(); draw_osk(); present_frame(); continue;
+        }
         if (current_mode == MODE_VIEW_HEX) {
             hexview_draw(); present_frame(); continue;
         }
@@ -2335,13 +2429,9 @@ int main(int argc, char *argv[]) {
 
         int head_h = cfg.font_size_header + 12;
         int foot_h = cfg.font_size_footer + 16;
-        // Icon size: native 32px; row must be tall enough to fit without scaling.
-        // We also want a small amount of padding above and below the icon.
-        const int ICO_SIZE = 32;
-        const int ICO_PAD  = 3;   // px above and below icon within row
-        int item_h = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) + 6;
-        if (item_h < ICO_SIZE + ICO_PAD * 2)
-            item_h = ICO_SIZE + ICO_PAD * 2;
+        const int ICO_PAD = 3;
+        int item_h  = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) + 6;
+        int ico_size = SDL_max(8, item_h - 2 * ICO_PAD);
         int pane_w = cfg.single_pane ? cfg.screen_w : cfg.screen_w / 2;
         int p_begin = cfg.single_pane ? active_pane : 0;
         int p_end   = cfg.single_pane ? active_pane + 1 : 2;
@@ -2352,11 +2442,13 @@ int main(int argc, char *argv[]) {
             SDL_Rect hr = {x, 0, pane_w - 1, head_h}; SDL_RenderFillRect(renderer, &hr);
             SDL_Rect pane_clip = {x, 0, pane_w - 1, cfg.screen_h};
             SDL_RenderSetClipRect(renderer, &pane_clip);
-            draw_txt(font_header, s->current_path, x + 5, 5, cfg.theme.text);
+            char disp_path[MAX_PATH * 2];
+            shorten_path(s->current_path, disp_path, sizeof(disp_path), font_header, pane_w - 12);
+            draw_txt(font_header, disp_path, x + 5, 5, cfg.theme.text);
             int max_v = (cfg.screen_h - head_h - foot_h) / item_h;
             if (s->selected_index >= s->scroll_offset + max_v) s->scroll_offset = s->selected_index - max_v + 1;
             if (s->selected_index <  s->scroll_offset)         s->scroll_offset = s->selected_index;
-            for (int i = s->scroll_offset; i < s->file_count && i < s->scroll_offset + max_v; i++) {
+            for (int i = s->scroll_offset; i < s->file_count && i < s->scroll_offset + max_v + 1; i++) {
                 int iy = head_h + (i - s->scroll_offset) * item_h;
                 if (i % 2 != 0) { SDL_SetRenderDrawColor(renderer, cfg.theme.alt_bg.r, cfg.theme.alt_bg.g, cfg.theme.alt_bg.b, 255); SDL_Rect ar={x,iy,pane_w-1,item_h}; SDL_RenderFillRect(renderer,&ar); }
                 if (p == active_pane && i == s->selected_index) { SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 255); SDL_Rect sr={x,iy,pane_w-1,item_h}; SDL_RenderFillRect(renderer,&sr); }
@@ -2372,7 +2464,7 @@ int main(int argc, char *argv[]) {
                 else
                     name_col = s->files[i].marked ? cfg.theme.marked : (is_selected ? cfg.theme.highlight_text : (s->files[i].is_link ? cfg.theme.link : cfg.theme.text));
                 if (icn) {
-                    SDL_Rect ir={x+5, iy+ICO_PAD, ICO_SIZE, ICO_SIZE};
+                    SDL_Rect ir={x+5, iy+ICO_PAD, ico_size, ico_size};
                     SDL_SetTextureAlphaMod(icn, is_cut ? 100 : 255);
                     if (cfg.tint_icons)
                         SDL_SetTextureColorMod(icn, name_col.r, name_col.g, name_col.b);
@@ -2380,7 +2472,7 @@ int main(int argc, char *argv[]) {
                     SDL_SetTextureAlphaMod(icn, 255);
                     SDL_SetTextureColorMod(icn, 255, 255, 255);
                 }
-                draw_txt(font_list, s->files[i].name, x+ICO_SIZE+10, iy+(item_h-cfg.font_size_list)/2, name_col);
+                draw_txt(font_list, s->files[i].name, x+ico_size+10, iy+(item_h-cfg.font_size_list)/2, name_col);
             }
             SDL_RenderSetClipRect(renderer, NULL);
         }
@@ -2441,7 +2533,9 @@ int main(int argc, char *argv[]) {
         if (current_mode == MODE_CONTEXT_MENU) {
             int pi=6, isz=32, spc=(cfg.font_size_menu>isz?cfg.font_size_menu:isz)+pi;
             bool in_sub = menu_in_files;
-            int  item_count = in_sub ? FILEMENU_MAX : TOPMENU_MAX;
+            static const int sys_render_items[] = { TOPMENU_SETTINGS, TOPMENU_ABOUT, TOPMENU_EXIT };
+            int  filemenu_count = cfg.two_menu_mode ? FILEMENU_MAX - 1 : FILEMENU_MAX;
+            int  item_count = in_sub ? filemenu_count : (menu_is_system ? 3 : TOPMENU_MAX);
             int mw=270, mh=item_count*spc+20, mx=(cfg.screen_w-mw)/2, my=(cfg.screen_h-mh)/2;
             SDL_Rect mbg={mx,my,mw,mh};
             SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_BLEND);
@@ -2452,9 +2546,10 @@ int main(int argc, char *argv[]) {
             SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_NONE);
 
             if (!in_sub) {
-                // ── Top-level menu ─────────────────────────────────────────
+                // ── Top-level / system menu ────────────────────────────────
                 SDL_Texture *top_icons[TOPMENU_MAX] = { tex_folder, tex_settings, tex_about, tex_exit };
-                for (int i = 0; i < TOPMENU_MAX; i++) {
+                for (int i = 0; i < item_count; i++) {
+                    int ti = menu_is_system ? sys_render_items[i] : i;  // actual TOPMENU_* index
                     bool sel = (i == menu_selection);
                     SDL_Color c = sel ? cfg.theme.highlight_text : cfg.theme.text;
                     int iy = my + 10 + i * spc;
@@ -2463,16 +2558,16 @@ int main(int argc, char *argv[]) {
                         SDL_Rect row = {mx + 2, iy - 2, mw - 4, spc};
                         SDL_RenderFillRect(renderer, &row);
                     }
-                    if (top_icons[i]) {
+                    if (top_icons[ti]) {
                         SDL_Rect ir={mx+15,iy+(spc-isz)/2,isz,isz};
-                        SDL_SetTextureAlphaMod(top_icons[i],255);
-                        if (cfg.tint_icons) SDL_SetTextureColorMod(top_icons[i], c.r, c.g, c.b);
-                        SDL_RenderCopy(renderer,top_icons[i],NULL,&ir);
-                        SDL_SetTextureColorMod(top_icons[i], 255, 255, 255);
+                        SDL_SetTextureAlphaMod(top_icons[ti],255);
+                        if (cfg.tint_icons) SDL_SetTextureColorMod(top_icons[ti], c.r, c.g, c.b);
+                        SDL_RenderCopy(renderer,top_icons[ti],NULL,&ir);
+                        SDL_SetTextureColorMod(top_icons[ti], 255, 255, 255);
                     }
-                    draw_txt_clipped(font_menu, tr(topmenu_items[i]), mx+60, iy+(spc-cfg.font_size_menu)/2, mw-75, c);
-                    // Arrow indicator for Files entry
-                    if (i == TOPMENU_FILES && tex_enterfol) {
+                    draw_txt_clipped(font_menu, tr(topmenu_items[ti]), mx+60, iy+(spc-cfg.font_size_menu)/2, mw-75, c);
+                    // Arrow indicator for Files entry (not shown in system menu)
+                    if (ti == TOPMENU_FILES && tex_enterfol) {
                         SDL_Rect ar = { mx+mw-isz-15, iy+(spc-isz)/2, isz, isz };
                         SDL_SetTextureAlphaMod(tex_enterfol, 255);
                         if (cfg.tint_icons) SDL_SetTextureColorMod(tex_enterfol, c.r, c.g, c.b);
@@ -2491,7 +2586,9 @@ int main(int argc, char *argv[]) {
                 for (int ri = 0; ri < rs->file_count; ri++) if (rs->files[ri].marked) { _any_m = true; break; }
                 bool _dotdot = (!_any_m && rs->file_count > 0 &&
                                 strcmp(rs->files[rs->selected_index].name, "..") == 0);
+                int frow = 0;
                 for (int i = 0; i < FILEMENU_MAX; i++) {
+                    if (i == FILEMENU_BACK && cfg.two_menu_mode) continue;
                     bool dis = (i == FILEMENU_PASTE   && clip.op == OP_NONE) ||
                                (i == FILEMENU_SYMLINK && (clip.op != OP_COPY || clip.count == 0 ||
                                    (!fs_supports_symlinks(panes[0].current_path) &&
@@ -2500,7 +2597,8 @@ int main(int argc, char *argv[]) {
                                             i == FILEMENU_RENAME || i == FILEMENU_DELETE));
                     bool sel = (i == filemenu_sel);
                     SDL_Color c = dis ? cfg.theme.text_disabled : (sel ? cfg.theme.highlight_text : cfg.theme.text);
-                    int iy = my + 10 + i * spc;
+                    int iy = my + 10 + frow * spc;
+                    frow++;
                     if (sel) {
                         SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 255);
                         SDL_Rect row = {mx + 2, iy - 2, mw - 4, spc};

@@ -7,6 +7,16 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
+#ifdef __linux__
+#  include <sys/syscall.h>
+#  ifdef SYS_copy_file_range
+#    define HAVE_CFR 1
+static ssize_t do_cfr(int in, off_t *off_in, int out, off_t *off_out, size_t len) {
+    return syscall(SYS_copy_file_range, in, off_in, out, off_out, len, 0);
+}
+#  endif
+#endif
 
 char* trim(char* str) {
     char* end;
@@ -61,7 +71,7 @@ void load_dir(int p_idx, const char* path) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
         if (!cfg.show_hidden && e->d_name[0] == '.') continue;
         char full[MAX_PATH];
-        join_path(full, path, e->d_name);   // fixed: no // at root
+        join_path(full, path, e->d_name);
         struct stat lst, st;
         if (lstat(full, &lst) == 0) {
             bool link = S_ISLNK(lst.st_mode);
@@ -82,54 +92,176 @@ void load_dir(int p_idx, const char* path) {
     vtree_log("[load_dir] pane %d: %d entries loaded\n", p_idx + 1, s->file_count);
 }
 
+// ---- copy_path helpers ----
+
+// Copies file data from src to dst. Tries copy_file_range (kernel 4.5+, stays in-kernel)
+// and falls back to a read/write loop on ENOSYS/EXDEV/EINVAL (e.g. kernel 4.4, cross-device).
+static int copy_file_data(FILE *src, FILE *dst, off_t file_size) {
+#ifdef HAVE_CFR
+    if (file_size > 0) {
+        off_t off_in = 0, off_out = 0;
+        ssize_t r = do_cfr(fileno(src), &off_in, fileno(dst), &off_out, (size_t)file_size);
+        if (r >= 0 || (errno != ENOSYS && errno != EXDEV && errno != EINVAL)) {
+            if (r < 0) return -1;
+            off_t remaining = file_size - r;
+            while (remaining > 0) {
+                r = do_cfr(fileno(src), &off_in, fileno(dst), &off_out, (size_t)remaining);
+                if (r <= 0) return r < 0 ? -1 : 0;
+                remaining -= r;
+            }
+            return 0;
+        }
+        // Not supported — seek back and fall through to read/write
+        rewind(src);
+        rewind(dst);
+    }
+#else
+    (void)file_size;
+#endif
+    char buf[32768];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
+        if (fwrite(buf, 1, n, dst) != n) return -1;
+    }
+    return ferror(src) ? -1 : 0;
+}
+
+// (dev, ino) pairs for cycle detection during directory traversal
+#define MAX_VISIT 512
+typedef struct { dev_t dev; ino_t ino; } InodePair;
+
+static int copy_path_r(const char *src, const char *dest,
+                       InodePair *vis, int *nvis);
+
 // Returns 0 on full success, -1 if any file failed
 int copy_path(const char* src, const char* dest) {
+    InodePair vis[MAX_VISIT];
+    int nvis = 0;
+    return copy_path_r(src, dest, vis, &nvis);
+}
+
+static int copy_path_r(const char *src, const char *dest,
+                       InodePair *vis, int *nvis) {
     struct stat st;
-    if (stat(src, &st) != 0) return -1;
+    if (lstat(src, &st) != 0) return -1;
+
+    // Symlink: recreate without following — prevents cycles and preserves links
+    if (S_ISLNK(st.st_mode)) {
+        char target[MAX_PATH];
+        ssize_t n = readlink(src, target, sizeof(target) - 1);
+        if (n < 0) {
+            vtree_log("[copy] readlink FAILED: %s (errno %d: %s)\n", src, errno, strerror(errno));
+            return -1;
+        }
+        target[n] = '\0';
+        if (symlink(target, dest) != 0) {
+            vtree_log("[copy] symlink FAILED: %s -> %s (errno %d: %s)\n",
+                      dest, target, errno, strerror(errno));
+            return -1;
+        }
+        return 0;
+    }
 
     if (S_ISDIR(st.st_mode)) {
+        // Cycle detection: refuse to re-enter a directory inode we've already visited
+        for (int i = 0; i < *nvis; i++) {
+            if (vis[i].dev == st.st_dev && vis[i].ino == st.st_ino) {
+                vtree_log("[copy] cycle detected, skipping: %s\n", src);
+                return 0;
+            }
+        }
+        if (*nvis < MAX_VISIT) {
+            vis[*nvis].dev = st.st_dev;
+            vis[*nvis].ino = st.st_ino;
+            (*nvis)++;
+        }
+
         vtree_log("[copy] mkdir %s\n", dest);
-        if (mkdir(dest, 0755) != 0)
+        if (mkdir(dest, st.st_mode & 07777) != 0 && errno != EEXIST)
             vtree_log("[copy] mkdir FAILED: %s (errno %d: %s)\n", dest, errno, strerror(errno));
-        DIR* dir = opendir(src);
-        if (!dir) { vtree_log("[copy] opendir FAILED: %s (errno %d: %s)\n", src, errno, strerror(errno)); return -1; }
-        struct dirent* e;
+
+        DIR *dir = opendir(src);
+        if (!dir) {
+            vtree_log("[copy] opendir FAILED: %s (errno %d: %s)\n", src, errno, strerror(errno));
+            return -1;
+        }
+        struct dirent *e;
         int err = 0;
         while ((e = readdir(dir))) {
             if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+            if (strlen(src) + strlen(e->d_name) + 2 >= MAX_PATH) {
+                vtree_log("[copy] path too long, skipping: %s/%s\n", src, e->d_name);
+                err = -1;
+                continue;
+            }
             char s_sub[MAX_PATH], d_sub[MAX_PATH];
             join_path(s_sub, src,  e->d_name);
             join_path(d_sub, dest, e->d_name);
-            if (copy_path(s_sub, d_sub) != 0) err = -1;  // propagate errors
+            if (copy_path_r(s_sub, d_sub, vis, nvis) != 0) err = -1;
         }
         closedir(dir);
+
+        // Restore dir timestamps after all children are written
+        struct timespec times[2] = { st.st_atim, st.st_mtim };
+        utimensat(AT_FDCWD, dest, times, 0);
         return err;
     }
 
+    // Regular file (or other non-dir, non-link types)
     vtree_log("[copy] %s -> %s\n", src, dest);
-    FILE *fs = fopen(src,  "rb");
-    FILE *fd = fopen(dest, "wb");
-    if (!fs || !fd) {
-        vtree_log("[copy] fopen FAILED: %s (errno %d: %s)\n",
-                  !fs ? src : dest, errno, strerror(errno));
-        if (fs) fclose(fs); if (fd) fclose(fd); return -1;
+
+    // Build temp path for atomic write; on success we rename into place
+    char tmp[MAX_PATH];
+    if (snprintf(tmp, sizeof(tmp), "%s.vtree_tmp", dest) >= (int)sizeof(tmp)) {
+        vtree_log("[copy] temp path too long: %s\n", dest);
+        return -1;
     }
 
-    char buf[32768]; size_t n;
-    int err = 0;
-    while ((n = fread(buf, 1, sizeof(buf), fs)) > 0) {
-        if (fwrite(buf, 1, n, fd) != n) {
-            vtree_log("[copy] write FAILED: %s (errno %d: %s)\n", dest, errno, strerror(errno));
-            err = -1; break;
-        }
+    FILE *fs = fopen(src, "rb");
+    if (!fs) {
+        vtree_log("[copy] fopen FAILED: %s (errno %d: %s)\n", src, errno, strerror(errno));
+        return -1;
     }
-    fclose(fs); fclose(fd);
-    return err;
+    struct stat src_stat;
+    fstat(fileno(fs), &src_stat);
+
+    FILE *fd = fopen(tmp, "wb");
+    if (!fd) {
+        vtree_log("[copy] fopen FAILED: %s (errno %d: %s)\n", tmp, errno, strerror(errno));
+        fclose(fs);
+        return -1;
+    }
+
+    int err = copy_file_data(fs, fd, src_stat.st_size);
+    fclose(fs);
+    if (fclose(fd) != 0) {
+        vtree_log("[copy] fclose FAILED: %s (errno %d: %s)\n", tmp, errno, strerror(errno));
+        err = -1;
+    }
+
+    if (err != 0) {
+        unlink(tmp);
+        return -1;
+    }
+
+    // Restore permissions and timestamps before moving into place
+    chmod(tmp, src_stat.st_mode & 07777);
+    struct timespec times[2] = { src_stat.st_atim, src_stat.st_mtim };
+    utimensat(AT_FDCWD, tmp, times, 0);
+
+    if (rename(tmp, dest) != 0) {
+        vtree_log("[copy] rename FAILED: %s -> %s (errno %d: %s)\n",
+                  tmp, dest, errno, strerror(errno));
+        unlink(tmp);
+        return -1;
+    }
+    return 0;
 }
 
 int delete_path(const char* path) {
     struct stat st;
-    if (stat(path, &st) != 0) return -1;
+    // lstat: don't follow symlinks — a symlink to a dir must be unlinked, not recursed into
+    if (lstat(path, &st) != 0) return -1;
 
     if (S_ISDIR(st.st_mode)) {
         DIR* dir = opendir(path);
@@ -148,6 +280,7 @@ int delete_path(const char* path) {
         return r;
     }
 
+    // Files and symlinks: unlink removes both
     vtree_log("[delete] unlink %s\n", path);
     int r = unlink(path);
     if (r != 0) vtree_log("[delete] unlink FAILED: %s (errno %d: %s)\n", path, errno, strerror(errno));

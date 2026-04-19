@@ -54,6 +54,11 @@ static TextViewState tv;
 static bool   tv_osk_pending = false;   // OSK was opened for a line edit
 static int    tv_osk_line    = -1;      // which line is being edited
 
+// Line-ops menu state
+static bool tv_menu_open   = false;
+static int  tv_menu_sel    = 0;         // 0=New Line, 1=Duplicate, 2=Delete
+static bool tv_confirm_del = false;     // waiting for yes/no on non-empty line delete
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -133,6 +138,8 @@ void viewer_open(const char *path) {
     tv.modified   = false;
     tv_osk_pending = false;
     tv_osk_line   = -1;
+    tv_menu_open   = false;
+    tv_confirm_del = false;
 
     // Read file via standard I/O (no LOVE2D dependency)
     FILE *f = fopen(path, "rb");
@@ -169,8 +176,9 @@ void viewer_open(const char *path) {
 }
 
 void viewer_close(void) {
-    // Nothing to free (static arrays), just mode change handled by caller
     tv_osk_pending = false;
+    tv_menu_open   = false;
+    tv_confirm_del = false;
 }
 
 // Called from main.c after the OSK completes a line edit (commit)
@@ -198,6 +206,123 @@ const char *viewer_get_line(int idx) {
 }
 
 // ---------------------------------------------------------------------------
+// Line operations
+// ---------------------------------------------------------------------------
+
+static void tv_op_new_line(void) {
+    if (tv.line_count >= TV_MAX_LINES) return;
+    int ins = tv.cur_line + 1;
+    for (int i = tv.line_count; i > ins; i--)
+        memcpy(tv.lines[i], tv.lines[i - 1], TV_MAX_LINE_LEN);
+    tv.lines[ins][0] = '\0';
+    tv.line_count++;
+    tv.cur_line = ins;
+    tv.modified = true;
+    tv_clamp_scroll();
+}
+
+static void tv_op_duplicate_line(void) {
+    if (tv.line_count >= TV_MAX_LINES) return;
+    int ins = tv.cur_line + 1;
+    for (int i = tv.line_count; i > ins; i--)
+        memcpy(tv.lines[i], tv.lines[i - 1], TV_MAX_LINE_LEN);
+    memcpy(tv.lines[ins], tv.lines[tv.cur_line], TV_MAX_LINE_LEN);
+    tv.line_count++;
+    tv.cur_line = ins;
+    tv.modified = true;
+    tv_clamp_scroll();
+}
+
+static void tv_op_delete_line(void) {
+    for (int i = tv.cur_line; i < tv.line_count - 1; i++)
+        memcpy(tv.lines[i], tv.lines[i + 1], TV_MAX_LINE_LEN);
+    tv.line_count--;
+    if (tv.line_count == 0) { tv.lines[0][0] = '\0'; tv.line_count = 1; }
+    if (tv.cur_line >= tv.line_count) tv.cur_line = tv.line_count - 1;
+    tv.modified = true;
+    tv_clamp_scroll();
+}
+
+// ---------------------------------------------------------------------------
+// Menu overlay draw (called from viewer_draw when tv_menu_open)
+// ---------------------------------------------------------------------------
+
+#define TV_MENU_ITEMS 3
+static const char *tv_menu_labels[TV_MENU_ITEMS] = {
+    "Viewer_MenuNewLine",
+    "Viewer_MenuDuplicate",
+    "Viewer_MenuDelete",
+};
+
+static void tv_draw_menu(void) {
+    // Dim backdrop
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 140);
+    SDL_Rect scr = {0, 0, cfg.screen_w, cfg.screen_h};
+    SDL_RenderFillRect(renderer, &scr);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+    int lh  = cfg.font_size_menu + 12;
+    int hh  = cfg.font_size_header + 16;
+    int mw  = cfg.screen_w - 80;
+    int mh  = hh + TV_MENU_ITEMS * lh + 10;
+    int mx  = (cfg.screen_w - mw) / 2;
+    int my  = (cfg.screen_h - mh) / 2;
+
+    SDL_Rect mbg  = {mx, my, mw, mh};
+    SDL_Rect head = {mx, my, mw, hh};
+    SDL_Rect body = {mx, my + hh, mw, mh - hh};
+
+    SDL_SetRenderDrawColor(renderer,
+        cfg.theme.header_bg.r, cfg.theme.header_bg.g, cfg.theme.header_bg.b, 255);
+    SDL_RenderFillRect(renderer, &head);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer,
+        cfg.theme.menu_bg.r, cfg.theme.menu_bg.g, cfg.theme.menu_bg.b, cfg.theme.menu_bg.a);
+    SDL_RenderFillRect(renderer, &body);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(renderer,
+        cfg.theme.menu_border.r, cfg.theme.menu_border.g, cfg.theme.menu_border.b, 255);
+    SDL_RenderDrawRect(renderer, &mbg);
+
+    draw_txt_clipped(font_header, tr("Viewer_MenuTitle"),
+                     mx + 10, my + (hh - cfg.font_size_header) / 2, mw - 20, cfg.theme.text);
+
+    SDL_RenderSetClipRect(renderer, &mbg);
+    for (int i = 0; i < TV_MENU_ITEMS; i++) {
+        int iy = my + hh + 5 + i * lh;
+        if (i == tv_menu_sel) {
+            SDL_SetRenderDrawColor(renderer,
+                cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g,
+                cfg.theme.highlight_bg.b, 255);
+            SDL_Rect hr = {mx + 1, iy, mw - 2, lh};
+            SDL_RenderFillRect(renderer, &hr);
+        }
+        SDL_Color lc = (i == tv_menu_sel) ? cfg.theme.highlight_text : cfg.theme.text;
+        draw_txt_clipped(font_menu, tr(tv_menu_labels[i]),
+                         mx + 16, iy + (lh - cfg.font_size_menu) / 2, mw - 32, lc);
+    }
+    SDL_RenderSetClipRect(renderer, NULL);
+
+    // Delete-confirmation prompt drawn below the menu
+    if (tv_confirm_del) {
+        int ph = cfg.font_size_footer + 14;
+        int py = my + mh + 6;
+        if (py + ph > cfg.screen_h) py = my - ph - 6;
+        SDL_Rect pbg = {mx, py, mw, ph};
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer,
+            cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g,
+            cfg.theme.highlight_bg.b, 210);
+        SDL_RenderFillRect(renderer, &pbg);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        draw_txt_clipped(font_footer, tr("Viewer_MenuDeleteConfirm"),
+                         mx + 10, py + (ph - cfg.font_size_footer) / 2,
+                         mw - 20, cfg.theme.highlight_text);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 void viewer_handle_button(SDL_GameControllerButton btn,
@@ -208,7 +333,58 @@ void viewer_handle_button(SDL_GameControllerButton btn,
     (void)dpad_left_held; (void)dpad_right_held;
     (void)now;
 
-    if (btn == cfg.k_back || btn == cfg.k_menu) {
+    // ── Menu overlay input ────────────────────────────────────────────────────
+    if (tv_menu_open) {
+        if (tv_confirm_del) {
+            // Waiting for delete confirmation
+            if (btn == cfg.k_confirm) {
+                tv_op_delete_line();
+                tv_confirm_del = false;
+                tv_menu_open   = false;
+            } else if (btn == cfg.k_back || btn == cfg.k_menu) {
+                tv_confirm_del = false;
+                tv_menu_open   = false;
+            }
+            return;
+        }
+        if (btn == cfg.k_back || btn == cfg.k_menu) {
+            tv_menu_open = false;
+        } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
+            tv_menu_sel = (tv_menu_sel - 1 + TV_MENU_ITEMS) % TV_MENU_ITEMS;
+        } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            tv_menu_sel = (tv_menu_sel + 1) % TV_MENU_ITEMS;
+        } else if (btn == cfg.k_confirm) {
+            if (tv_menu_sel == 0) {         // New Line
+                tv_op_new_line();
+                tv_menu_open = false;
+            } else if (tv_menu_sel == 1) {  // Duplicate Line
+                tv_op_duplicate_line();
+                tv_menu_open = false;
+            } else if (tv_menu_sel == 2) {  // Delete Line
+                if (tv.lines[tv.cur_line][0] == '\0') {
+                    tv_op_delete_line();    // empty line — delete immediately
+                    tv_menu_open = false;
+                } else {
+                    tv_confirm_del = true;  // non-empty — ask first
+                }
+            }
+        }
+        return;
+    }
+
+    if (btn == cfg.k_back) {
+        current_mode = MODE_EXPLORER;
+        return;
+    }
+
+    if (btn == cfg.k_menu && !tv.read_only) {
+        tv_menu_open   = true;
+        tv_menu_sel    = 0;
+        tv_confirm_del = false;
+        return;
+    }
+    // k_menu on read-only still closes (original behaviour)
+    if (btn == cfg.k_menu) {
         current_mode = MODE_EXPLORER;
         return;
     }
@@ -238,11 +414,15 @@ void viewer_handle_button(SDL_GameControllerButton btn,
         tv_clamp_scroll();
     }
     else if (btn == cfg.k_pgup) {
-        tv.cur_line = SDL_max(0, tv.cur_line - tv_visible_lines());
+        int vis = tv_visible_lines();
+        tv.top_line = SDL_max(0, tv.top_line - vis);
+        tv.cur_line = SDL_min(tv.line_count - 1, tv.top_line + vis - 1);
         tv_clamp_scroll();
     }
     else if (btn == cfg.k_pgdn) {
-        tv.cur_line = SDL_min(tv.line_count - 1, tv.cur_line + tv_visible_lines());
+        int vis = tv_visible_lines();
+        tv.top_line = SDL_min(SDL_max(0, tv.line_count - vis), tv.top_line + vis);
+        tv.cur_line = tv.top_line;
         tv_clamp_scroll();
     }
     else if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT && !tv.modified) {
@@ -299,7 +479,7 @@ void viewer_draw(void) {
     int line_num_w = cfg.font_size_list * 4;  // width reserved for line numbers (4 chars wide)
     int text_x     = 6 + line_num_w;
 
-    for (int i = 0; i < vis; i++) {
+    for (int i = 0; i < vis + 1; i++) {
         int li = tv.top_line + i;
         if (li >= tv.line_count) break;
         int ry = head_h + i * item_h;
@@ -348,4 +528,7 @@ void viewer_draw(void) {
         hint = tr("Viewer_HintEdit");
     draw_txt_clipped(font_footer, hint, 8, cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
              cfg.screen_w - 16, cfg.theme.text_disabled);
+
+    if (tv_menu_open)
+        tv_draw_menu();
 }

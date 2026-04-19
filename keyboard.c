@@ -65,7 +65,7 @@ char      *osk_path_target = NULL;
 void osk_init_common(void) {
     osk.row         = 0;
     osk.col         = 0;
-    osk.layer       = OSK_LOWER;
+    osk.layer       = OSK_UPPER;
     osk.insert_mode = true;   // start in INSERT mode
     osk.kb_visible  = true;   // keyboard shown by default
 }
@@ -100,7 +100,11 @@ void osk_backspace(void) {
 }
 
 void osk_cycle_layer(void) {
-    osk.layer = (OSKLayer)((osk.layer + 1) % OSK_LAYER_COUNT);
+    switch (osk.layer) {
+        case OSK_UPPER:   osk.layer = OSK_LOWER;   break;
+        case OSK_LOWER:   osk.layer = OSK_SPECIAL;  break;
+        default:          osk.layer = OSK_UPPER;   break;
+    }
 }
 
 // Move text cursor (caret) left/right within buffer
@@ -367,21 +371,30 @@ void draw_osk(void) {
 
     if (font_list) {
         SDL_Rect clip_r = {cx + 1, y + 1, cw - 2, fh - 2};
-        SDL_RenderSetClipRect(renderer, &clip_r);
-        if (osk.len > 0)
-            draw_txt(font_list, osk.buf, text_left, text_top, cfg.theme.text);
+        int field_inner_w = cw - 2;
 
-        // Compute caret pixel x — measure prefix
-        int caret_px = text_left;
+        // Measure caret pixel position from text start (pre-scroll)
+        int caret_raw = 0;
         if (osk.cursor > 0) {
             char prefix[256];
             int plen = SDL_min(osk.cursor, 255);
             memcpy(prefix, osk.buf, plen);
             prefix[plen] = '\0';
-            int pw = 0;
-            TTF_SizeText(font_list, prefix, &pw, NULL);
-            caret_px = text_left + pw;
+            TTF_SizeText(font_list, prefix, &caret_raw, NULL);
         }
+
+        // Keep caret visible: scroll right if caret past right edge, left if past left
+        if (caret_raw - osk.scroll_x > field_inner_w - 8)
+            osk.scroll_x = caret_raw - (field_inner_w - 8);
+        if (caret_raw - osk.scroll_x < 0)
+            osk.scroll_x = caret_raw;
+
+        SDL_RenderSetClipRect(renderer, &clip_r);
+        int draw_x = text_left - osk.scroll_x;
+        if (osk.len > 0)
+            draw_txt(font_list, osk.buf, draw_x, text_top, cfg.theme.text);
+
+        int caret_px = draw_x + caret_raw;
 
         // Draw caret — blinking thin line (INSERT) or block underline (OVERWRITE)
         if ((glyph_frame / 30) % 2 == 0) {
