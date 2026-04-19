@@ -521,6 +521,22 @@ static void pending_keys_from_cfg(void) {
     pending_keys.osk_k_toggle = cfg.osk_k_toggle;
     pending_keys.osk_k_ins    = cfg.osk_k_ins;
 }
+static bool pending_keys_valid(void) {
+    if (pending_keys.k_confirm    == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.k_back       == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.k_menu       == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.k_mark       == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.k_pgup       == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.k_pgdn       == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (cfg.two_menu_mode && pending_keys.k_menu2 == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.osk_k_type   == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.osk_k_bksp   == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.osk_k_shift  == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.osk_k_cancel == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.osk_k_toggle == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    if (pending_keys.osk_k_ins    == SDL_CONTROLLER_BUTTON_INVALID) return false;
+    return true;
+}
 static void pending_keys_to_cfg(void) {
     cfg.k_confirm    = pending_keys.k_confirm;
     cfg.k_back       = pending_keys.k_back;
@@ -820,6 +836,13 @@ static void settings_confirm() {
 
     if (d->type == STYPE_ACTION) {
         if (settings_index == n - 2) {  // Save Config
+            if (!pending_keys_valid()) {
+                strncpy(settings_toast_msg, tr("Settings_UnsetKey"), sizeof(settings_toast_msg) - 1);
+                settings_save_toast = SDL_GetTicks() + 1800;
+                settings_toast_tw   = 0;
+                if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
+                return;
+            }
             pending_keys_to_cfg();
             save_config();
             cfg_snapshot       = cfg;
@@ -996,6 +1019,9 @@ static void draw_settings() {
     char hint[256];
     if (settings_listening)
         snprintf(hint, sizeof(hint), tr("Settings_HintBinding"), btn_label(cfg.k_back));
+    else if (settings_tab == 2)
+        snprintf(hint, sizeof(hint), tr("Settings_HintKeys"),
+                 btn_label(cfg.k_confirm), btn_label(cfg.k_pgup), btn_label(cfg.k_pgdn), btn_label(cfg.k_back));
     else
         snprintf(hint, sizeof(hint), tr("Settings_HintNormal"),
                  btn_label(cfg.k_confirm), btn_label(cfg.k_pgup), btn_label(cfg.k_pgdn), btn_label(cfg.k_back));
@@ -2143,17 +2169,25 @@ int main(int argc, char *argv[]) {
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN || btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
                             save_prompt_sel = 1;
                         } else if (btn == cfg.k_confirm) {
-                            if (save_prompt_sel == 0) {
-                                pending_keys_to_cfg();
-                                save_config();
-                                cfg_snapshot       = cfg;
-                                snapshot_theme_idx = current_named_theme;
-                                snapshot_font_idx  = current_font_idx;
-                                snapshot_lang_idx  = current_lang_idx;
-                                settings_dirty = false;
+                            if (save_prompt_sel == 0 && !pending_keys_valid()) {
+                                settings_save_prompt = false;
+                                strncpy(settings_toast_msg, tr("Settings_UnsetKey"), sizeof(settings_toast_msg) - 1);
                                 settings_save_toast = SDL_GetTicks() + 1800;
+                                settings_toast_tw   = 0;
+                                if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
+                            } else {
+                                if (save_prompt_sel == 0) {
+                                    pending_keys_to_cfg();
+                                    save_config();
+                                    cfg_snapshot       = cfg;
+                                    snapshot_theme_idx = current_named_theme;
+                                    snapshot_font_idx  = current_font_idx;
+                                    snapshot_lang_idx  = current_lang_idx;
+                                    settings_dirty = false;
+                                    settings_save_toast = SDL_GetTicks() + 1800;
+                                }
+                                settings_do_close();
                             }
-                            settings_do_close();
                         }
                     } else if (settings_listening) {
                         // Check for duplicate within the same binding group only
@@ -2203,6 +2237,14 @@ int main(int argc, char *argv[]) {
                             settings_adjust(+1);
                         } else if (btn == cfg.k_confirm) {
                             settings_confirm();
+                        } else if (btn == SDL_CONTROLLER_BUTTON_Y) {
+                            int tab_n2; SettingDef *defs2 = tab_defs(&tab_n2);
+                            SettingDef *d2 = &defs2[settings_index];
+                            if (d2->type == STYPE_KEYBIND && d2->btn_ptr) {
+                                *d2->btn_ptr = SDL_CONTROLLER_BUTTON_INVALID;
+                                settings_dirty = true;
+                                vtree_log("Keybind cleared\n");
+                            }
                         }
                     }
 

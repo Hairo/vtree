@@ -246,6 +246,7 @@ void osk_enter_new(const char *dir, bool is_dir) {
 // "back" is shown as "Select" to match common handheld labelling.
 // ---------------------------------------------------------------------------
 const char *btn_label(SDL_GameControllerButton btn) {
+    if (btn == SDL_CONTROLLER_BUTTON_INVALID) return "---";
     const char *s = SDL_GameControllerGetStringForButton(btn);
     if (!s) return "?";
     if (strcmp(s, "a")             == 0) return "A";

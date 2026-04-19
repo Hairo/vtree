@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <dirent.h>
 
 // ---------------------------------------------------------------------------
 // Named-theme table  (loaded from config.ini / theme.ini at runtime)
@@ -186,6 +187,25 @@ static void load_themes_from_file(FILE *f) {
 }
 
 // ---------------------------------------------------------------------------
+// Load all *.ini files from a directory as theme files.
+// ---------------------------------------------------------------------------
+static void load_themes_from_dir(const char *dir_path) {
+    DIR *d = opendir(dir_path);
+    if (!d) return;
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        const char *name = entry->d_name;
+        size_t len = strlen(name);
+        if (len < 5 || strcmp(name + len - 4, ".ini") != 0) continue;
+        char path[MAX_PATH];
+        snprintf(path, MAX_PATH, "%s/%s", dir_path, name);
+        FILE *f = fopen(path, "r");
+        if (f) { load_themes_from_file(f); fclose(f); }
+    }
+    closedir(d);
+}
+
+// ---------------------------------------------------------------------------
 void load_config() {
     // ── Defaults ─────────────────────────────────────────────────────────────
     cfg.screen_w         = 0;   // 0 = not set; resolved after parsing
@@ -217,8 +237,8 @@ void load_config() {
     // Explorer / global keys
     cfg.k_confirm = SDL_CONTROLLER_BUTTON_A;
     cfg.k_back    = SDL_CONTROLLER_BUTTON_B;
-    cfg.k_menu    = SDL_CONTROLLER_BUTTON_GUIDE;
-    cfg.k_mark    = SDL_CONTROLLER_BUTTON_Y;
+    cfg.k_menu    = SDL_CONTROLLER_BUTTON_Y;
+    cfg.k_mark    = SDL_CONTROLLER_BUTTON_BACK;
     cfg.k_pgup    = SDL_CONTROLLER_BUTTON_LEFTSHOULDER;
     cfg.k_pgdn    = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER;
     cfg.k_menu2   = SDL_CONTROLLER_BUTTON_GUIDE;
@@ -246,15 +266,11 @@ void load_config() {
         if (tf) fclose(tf);
     }
 
-    // ── Second: look for a sibling theme.ini and append its themes ─────────────
+    // ── Second: load per-file themes from sibling theme/ directory ──────────────
     {
-        char theme_path[MAX_PATH];
-        get_sibling_path("theme.ini", theme_path);
-        FILE *tf = fopen(theme_path, "r");
-        if (tf) {
-            load_themes_from_file(tf);
-            fclose(tf);
-        }
+        char theme_dir[MAX_PATH];
+        get_sibling_path("theme", theme_dir);
+        load_themes_from_dir(theme_dir);
     }
 
     // If no file-based themes were found, seed with the built-in Dark fallback
