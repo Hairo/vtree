@@ -1908,7 +1908,7 @@ int main(int argc, char *argv[]) {
                         int page   = SDL_max(1, (cfg.screen_h - head_h - foot_h) / item_h);
                         int new_top = SDL_max(0, s->scroll_offset - page);
                         s->scroll_offset  = new_top;
-                        s->selected_index = SDL_min(s->file_count - 1, new_top + page - 1);
+                        s->selected_index = new_top;
                     } else if (btn == cfg.k_pgdn) {
                         int item_h = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) + 6;
                         int head_h = cfg.font_size_header + 12;
@@ -1916,7 +1916,7 @@ int main(int argc, char *argv[]) {
                         int page   = SDL_max(1, (cfg.screen_h - head_h - foot_h) / item_h);
                         int new_top = SDL_min(SDL_max(0, s->file_count - page), s->scroll_offset + page);
                         s->scroll_offset  = new_top;
-                        s->selected_index = SDL_min(s->file_count - 1, new_top);
+                        s->selected_index = SDL_min(s->file_count - 1, new_top + page - 1);
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                         if (s->selected_index > 0) s->selected_index--;
                         else if (s->file_count > 0) s->selected_index = s->file_count - 1;
@@ -2544,10 +2544,14 @@ int main(int argc, char *argv[]) {
         SDL_Rect fr = {0, cfg.screen_h - foot_h, cfg.screen_w, foot_h}; SDL_RenderFillRect(renderer, &fr);
         char f_text[256];
         if (panes[active_pane].file_count > 0) {
-            FileEntry *sel = &panes[active_pane].files[panes[active_pane].selected_index];
+            AppState *fps = &panes[active_pane];
+            FileEntry *sel = &fps->files[fps->selected_index];
             char sz[16]; strncpy(sz, tr("Footer_SizeDir"), sizeof(sz)-1); sz[sizeof(sz)-1]='\0';
             if (!sel->is_dir) format_size(sel->size, sz);
-            snprintf(f_text, 256, tr("Footer_Pane"), active_pane+1, panes[active_pane].selected_index+1, panes[active_pane].file_count, sel->name, sz);
+            int has_dd      = (fps->file_count > 0 && strcmp(fps->files[0].name, "..") == 0) ? 1 : 0;
+            int disp_total  = fps->file_count - has_dd;
+            int disp_index  = (fps->selected_index >= has_dd) ? fps->selected_index - has_dd + 1 : 0;
+            snprintf(f_text, 256, tr("Footer_Pane"), active_pane+1, disp_index, disp_total, sel->name, sz);
         } else { snprintf(f_text, 256, tr("Footer_Empty"), active_pane+1); }
         draw_txt(font_footer, f_text, 12, cfg.screen_h - foot_h + 6, cfg.theme.text);
         // Clipboard badge — icon + count, floating above bottom-right corner
