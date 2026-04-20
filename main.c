@@ -2100,17 +2100,22 @@ int main(int argc, char *argv[]) {
                                 else { menu_in_files = false; }
                                 delete_confirm_active = false;
                             } else if (filemenu_sel == FILEMENU_COPY || filemenu_sel == FILEMENU_CUT) {
+                                FileOp req_op = (filemenu_sel == FILEMENU_COPY) ? OP_COPY : OP_CUT;
                                 if (clip.op != OP_NONE) {
-                                    clip.op = OP_NONE; clip.count = 0;
-                                    strncpy(explorer_toast_msg, tr("Clipboard_Cleared"), sizeof(explorer_toast_msg) - 1);
-                                    explorer_toast_until = SDL_GetTicks() + 1600;
-                                    explorer_toast_tw    = 0;
-                                    if (font_menu) TTF_SizeText(font_menu, explorer_toast_msg, &explorer_toast_tw, NULL);
+                                    if (clip.op == req_op) {
+                                        clip.op = OP_NONE; clip.count = 0;
+                                        strncpy(explorer_toast_msg, tr("Clipboard_Cleared"), sizeof(explorer_toast_msg) - 1);
+                                        explorer_toast_until = SDL_GetTicks() + 1600;
+                                        explorer_toast_tw    = 0;
+                                        if (font_menu) TTF_SizeText(font_menu, explorer_toast_msg, &explorer_toast_tw, NULL);
+                                    } else {
+                                        clip.op = req_op;
+                                    }
                                     current_mode = MODE_EXPLORER;
                                     break;
                                 }
                                 clip.count = 0;
-                                clip.op = (filemenu_sel == FILEMENU_COPY) ? OP_COPY : OP_CUT;
+                                clip.op = req_op;
                                 int cp_panes = cfg.single_pane ? 1 : 2;
                                 for (int p = 0; p < cp_panes; p++) {
                                     AppState *ps = &panes[p];
@@ -2743,7 +2748,8 @@ int main(int argc, char *argv[]) {
                                (_dotdot && (i == FILEMENU_COPY || i == FILEMENU_CUT ||
                                             i == FILEMENU_RENAME || i == FILEMENU_DELETE));
                     bool sel = (i == filemenu_sel);
-                    SDL_Color c = dis ? cfg.theme.text_disabled : (sel ? cfg.theme.highlight_text : cfg.theme.text);
+                    bool active = (i == FILEMENU_COPY && clip.op == OP_COPY) || (i == FILEMENU_CUT && clip.op == OP_CUT);
+                    SDL_Color c = dis ? cfg.theme.text_disabled : (sel ? cfg.theme.highlight_text : (active ? cfg.theme.marked : cfg.theme.text));
                     int iy = my + 10 + frow * spc;
                     frow++;
                     if (sel) {
