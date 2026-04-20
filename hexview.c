@@ -29,8 +29,8 @@
 //
 // GOTO mode:
 //   Up/Dn   +1 / -1 to target address
-//   Left     ×16
-//   Right    ÷16
+//   Left     -16
+//   Right    +16
 //   A        jump to address
 //   B        cancel
 // -----------------------------------------------------------------------------
@@ -356,8 +356,8 @@ void hexview_handle_button(SDL_GameControllerButton btn,
         }
         if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP)    { hv.goto_addr++; if (hv.goto_addr >= sz) hv.goto_addr = sz - 1; return; }
         if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN)  { hv.goto_addr--; if (hv.goto_addr < 0)   hv.goto_addr = 0;      return; }
-        if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT)  { hv.goto_addr = SDL_min((int)((unsigned)hv.goto_addr * 16), sz - 1); return; }
-        if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) { hv.goto_addr = hv.goto_addr / 16; if (hv.goto_addr < 0) hv.goto_addr = 0; return; }
+        if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT)  { hv.goto_addr -= 16; if (hv.goto_addr < 0)   hv.goto_addr = 0;      return; }
+        if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) { hv.goto_addr += 16; if (hv.goto_addr >= sz) hv.goto_addr = sz - 1; return; }
     }
 }
 
