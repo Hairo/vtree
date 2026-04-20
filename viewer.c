@@ -534,7 +534,7 @@ void viewer_draw(void) {
     else
         snprintf(hint, sizeof(hint), tr("Viewer_HintEdit"), lbl_pgup, lbl_pgdn, lbl_conf, lbl_back);
     draw_txt_clipped(font_footer, hint, 8, cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
-             cfg.screen_w - 16, cfg.theme.text_disabled);
+             cfg.screen_w - 16, cfg.theme.text);
 
     if (tv_menu_open)
         tv_draw_menu();

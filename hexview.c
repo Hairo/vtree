@@ -586,5 +586,5 @@ void hexview_draw(void) {
     }
     draw_txt_clipped(font_footer, hint, 8,
              cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
-             cfg.screen_w - 16, cfg.theme.text_disabled);
+             cfg.screen_w - 16, cfg.theme.text);
 }

@@ -345,8 +345,8 @@ void draw_osk(void) {
         const char *layer_lbl = tr(osk_layer_labels[osk.layer]);
         const char *mode_tag  = osk.insert_mode ? tr("OSK_Mode_Insert") : tr("OSK_Mode_Overwrite");
         SDL_Color   mode_col  = osk.insert_mode
-            ? (SDL_Color){80, 200, 80, 255}
-            : (SDL_Color){220, 100, 60, 255};
+            ? cfg.theme.link
+            : cfg.theme.marked;
         int lw = 0, mw = 0;
         if (font_header) {
             TTF_SizeText(font_header, layer_lbl, &lw, NULL);
@@ -531,5 +531,5 @@ void draw_osk(void) {
                  ins_state,
                  btn_label(cfg.osk_k_type));
     draw_txt_clipped(font_footer, hint, 12, gfoot_y + (gfoot_h - cfg.font_size_footer) / 2,
-             cfg.screen_w - 24, cfg.theme.text_disabled);
+             cfg.screen_w - 24, cfg.theme.text);
 }

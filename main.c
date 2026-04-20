@@ -891,7 +891,7 @@ static void draw_settings() {
     // Header bar
     SDL_SetRenderDrawColor(renderer, cfg.theme.header_bg.r, cfg.theme.header_bg.g, cfg.theme.header_bg.b, 255);
     SDL_Rect hr = {0, 0, cfg.screen_w, hh}; SDL_RenderFillRect(renderer, &hr);
-    draw_txt(font_header, tr("Settings_Header"), cl, 5, cfg.theme.text);
+    draw_txt(font_header, tr("Settings_Header"), cl, (hh - cfg.font_size_header) / 2, cfg.theme.text);
 
     // Tab strip
     int tab_w = cfg.screen_w / SETTINGS_TAB_COUNT;
@@ -1026,7 +1026,7 @@ static void draw_settings() {
     else
         snprintf(hint, sizeof(hint), tr("Settings_HintNormal"),
                  btn_label(cfg.k_confirm), btn_label(cfg.k_pgup), btn_label(cfg.k_pgdn), btn_label(cfg.k_back));
-    draw_txt_clipped(font_footer, hint, 12, cfg.screen_h - fh + 6, cfg.screen_w - 24, cfg.theme.text_disabled);
+    draw_txt_clipped(font_footer, hint, 12, cfg.screen_h - fh + (fh - cfg.font_size_footer) / 2, cfg.screen_w - 24, cfg.theme.text);
 
     // Save prompt modal
     if (settings_save_prompt) {
@@ -2506,7 +2506,7 @@ int main(int argc, char *argv[]) {
             SDL_RenderSetClipRect(renderer, &pane_clip);
             char disp_path[MAX_PATH * 2];
             shorten_path(s->current_path, disp_path, sizeof(disp_path), font_header, pane_w - 12);
-            draw_txt(font_header, disp_path, x + 5, 5, cfg.theme.text);
+            draw_txt(font_header, disp_path, x + 5, (head_h - cfg.font_size_header) / 2, cfg.theme.text);
             int max_v = (cfg.screen_h - head_h - foot_h) / item_h;
             if (s->selected_index >= s->scroll_offset + max_v) s->scroll_offset = s->selected_index - max_v + 1;
             if (s->selected_index <  s->scroll_offset)         s->scroll_offset = s->selected_index;
@@ -2553,7 +2553,7 @@ int main(int argc, char *argv[]) {
             int disp_index  = (fps->selected_index >= has_dd) ? fps->selected_index - has_dd + 1 : 0;
             snprintf(f_text, 256, tr("Footer_Pane"), active_pane+1, disp_index, disp_total, sel->name, sz);
         } else { snprintf(f_text, 256, tr("Footer_Empty"), active_pane+1); }
-        draw_txt(font_footer, f_text, 12, cfg.screen_h - foot_h + 6, cfg.theme.text);
+        draw_txt(font_footer, f_text, 12, cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2, cfg.theme.text);
         // Clipboard badge — icon + count, floating above bottom-right corner
         if (clip.op != OP_NONE) {
             SDL_Texture *clip_icon = (clip.op == OP_CUT) ? tex_cut : tex_copy;
