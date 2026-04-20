@@ -1909,6 +1909,7 @@ int main(int argc, char *argv[]) {
                         about_active = false; delete_confirm_active = false;
                         if (cfg.two_menu_mode) {
                             menu_in_files = true; menu_is_system = false; filemenu_sel = 0;
+                            { bool _am=false; for(int _i=0;_i<s->file_count;_i++) if(s->files[_i].marked){_am=true;break;} if(!_am&&!cfg.single_pane) for(int _i=0;_i<panes[1-active_pane].file_count;_i++) if(panes[1-active_pane].files[_i].marked){_am=true;break;} bool _dd=(!_am&&s->file_count>0&&strcmp(s->files[s->selected_index].name,"..")==0); while((_dd&&(filemenu_sel==FILEMENU_COPY||filemenu_sel==FILEMENU_CUT||filemenu_sel==FILEMENU_RENAME||filemenu_sel==FILEMENU_DELETE))||(filemenu_sel==FILEMENU_PASTE&&clip.op==OP_NONE)||(filemenu_sel==FILEMENU_SYMLINK&&(clip.op!=OP_COPY||clip.count==0||(!fs_supports_symlinks(panes[0].current_path)&&!fs_supports_symlinks(panes[1].current_path))))||(filemenu_sel==FILEMENU_BACK&&cfg.two_menu_mode)) filemenu_sel++; }
                         } else {
                             menu_in_files = false; menu_is_system = false; menu_selection = 0;
                         }
@@ -2210,6 +2211,7 @@ int main(int argc, char *argv[]) {
                             int sel = menu_is_system ? sys_items[menu_selection] : menu_selection;
                             if (sel == TOPMENU_FILES) {
                                 menu_in_files = true; filemenu_sel = 0;
+                                { bool _am=false; for(int _i=0;_i<s->file_count;_i++) if(s->files[_i].marked){_am=true;break;} if(!_am&&!cfg.single_pane) for(int _i=0;_i<panes[1-active_pane].file_count;_i++) if(panes[1-active_pane].files[_i].marked){_am=true;break;} bool _dd=(!_am&&s->file_count>0&&strcmp(s->files[s->selected_index].name,"..")==0); while((_dd&&(filemenu_sel==FILEMENU_COPY||filemenu_sel==FILEMENU_CUT||filemenu_sel==FILEMENU_RENAME||filemenu_sel==FILEMENU_DELETE))||(filemenu_sel==FILEMENU_PASTE&&clip.op==OP_NONE)||(filemenu_sel==FILEMENU_SYMLINK&&(clip.op!=OP_COPY||clip.count==0||(!fs_supports_symlinks(panes[0].current_path)&&!fs_supports_symlinks(panes[1].current_path))))||(filemenu_sel==FILEMENU_BACK&&cfg.two_menu_mode)) filemenu_sel++; }
                             } else if (sel == TOPMENU_SETTINGS) {
                                 cfg_snapshot       = cfg;
                                 snapshot_theme_idx = current_named_theme;
