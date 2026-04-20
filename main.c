@@ -587,6 +587,9 @@ static int    save_prompt_sel      = 0;      // 0=Save, 1=Discard
 static Uint32 settings_save_toast  = 0;      // non-zero until toast expires
 static int    settings_toast_tw    = 0;      // cached toast text width (set when toast activates)
 static char   settings_toast_msg[64] = "Config saved.";
+static Uint32 explorer_toast_until = 0;      // non-zero until toast expires
+static int    explorer_toast_tw    = 0;      // cached text width
+static char   explorer_toast_msg[64] = "";
 static AppConfig cfg_snapshot;               // cfg state at settings open (for discard)
 static int    snapshot_theme_idx   = -1;     // current_named_theme at settings open
 static int    snapshot_font_idx    = 0;      // current_font_idx at settings open
@@ -2061,6 +2064,15 @@ int main(int argc, char *argv[]) {
                                 else { menu_in_files = false; }
                                 delete_confirm_active = false;
                             } else if (filemenu_sel == FILEMENU_COPY || filemenu_sel == FILEMENU_CUT) {
+                                if (clip.op != OP_NONE) {
+                                    clip.op = OP_NONE; clip.count = 0;
+                                    strncpy(explorer_toast_msg, tr("Clipboard_Cleared"), sizeof(explorer_toast_msg) - 1);
+                                    explorer_toast_until = SDL_GetTicks() + 1600;
+                                    explorer_toast_tw    = 0;
+                                    if (font_menu) TTF_SizeText(font_menu, explorer_toast_msg, &explorer_toast_tw, NULL);
+                                    current_mode = MODE_EXPLORER;
+                                    break;
+                                }
                                 clip.count = 0;
                                 clip.op = (filemenu_sel == FILEMENU_COPY) ? OP_COPY : OP_CUT;
                                 for (int i = 0; i < s->file_count; i++) {
@@ -2706,6 +2718,22 @@ int main(int argc, char *argv[]) {
 
         // File info modal overlay
         if (current_mode == MODE_EXPLORER && fileinfo_active) draw_fileinfo_modal();
+
+        // Explorer toast (e.g. Clipboard Cleared)
+        if (explorer_toast_until && SDL_GetTicks() < explorer_toast_until) {
+            int foot_h = cfg.font_size_footer + 16;
+            int th = cfg.font_size_menu + 16;
+            int tw = explorer_toast_tw;
+            int tx = (cfg.screen_w - tw - 20) / 2;
+            int ty = cfg.screen_h - foot_h - th - 8;
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g,
+                                   cfg.theme.highlight_bg.b, 220);
+            SDL_Rect tbg = {tx, ty, tw + 20, th}; SDL_RenderFillRect(renderer, &tbg);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+            draw_txt(font_menu, explorer_toast_msg, tx + 10,
+                     ty + (th - cfg.font_size_menu) / 2, cfg.theme.highlight_text);
+        }
 
         present_frame();
     }
