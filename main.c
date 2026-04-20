@@ -99,6 +99,7 @@ SDL_Texture *tex_rename = NULL, *tex_delete = NULL, *tex_settings = NULL, *tex_e
 SDL_Texture *tex_newfile = NULL, *tex_newfolder = NULL, *tex_about = NULL;
 SDL_Texture *tex_enterfol = NULL;
 SDL_Texture *tex_viewer = NULL, *tex_hexview = NULL, *tex_imgview = NULL, *tex_fileinfo = NULL, *tex_exec = NULL;
+SDL_Texture *tex_logo = NULL;
 
 // ---------------------------------------------------------------------------
 // Font file list — populated by scan_fonts() at startup
@@ -1201,7 +1202,7 @@ static void draw_about_modal() {
 
     int lh  = cfg.font_size_menu + 10;
     int flh = cfg.font_size_footer + 8;
-    int hh  = cfg.font_size_header + 16;
+    int hh  = 64 + 20;
     int mh  = hh + 14 + lh + lh + lh + lh + lh/2 + flh + 10;
     int mw  = cfg.screen_w - 80;
     int mx  = (cfg.screen_w - mw) / 2, my = (cfg.screen_h - mh) / 2;
@@ -1222,11 +1223,26 @@ static void draw_about_modal() {
     // Clip to modal so no text escapes the border
     SDL_RenderSetClipRect(renderer, &mbg);
 
-    int lx = mx + 18;
-    if (tex_about) { SDL_Rect ir = {lx, my + (hh - 24) / 2, 24, 24}; SDL_RenderCopy(renderer, tex_about, NULL, &ir); lx += 30; }
-    char title_buf[32];
-    snprintf(title_buf, sizeof(title_buf), "%s" VTREE_VERSION, tr("AppTitle"));
-    draw_txt(font_header, title_buf, lx, my + (hh - cfg.font_size_header) / 2, cfg.theme.marked);
+    // Measure text columns to compute centered title row
+    int tw1 = 0, tw2 = 0;
+    if (font_header) TTF_SizeUTF8(font_header, tr("AppTitle"),  &tw1, NULL);
+    if (font_footer) TTF_SizeUTF8(font_footer, "v" VTREE_VERSION, &tw2, NULL);
+    int text_col_w = SDL_max(tw1, tw2);
+    int logo_w     = tex_logo ? 64 + 12 : 0;
+    int row_w      = logo_w + text_col_w;
+    int row_x      = mx + (mw - row_w) / 2;
+    int row_y      = my + 10;
+
+    if (tex_logo) {
+        SDL_Rect lr = {row_x, row_y, 64, 64};
+        SDL_RenderCopy(renderer, tex_logo, NULL, &lr);
+    }
+
+    int txt_block_h = cfg.font_size_header + 4 + cfg.font_size_footer;
+    int txt_x       = row_x + logo_w;
+    int txt_y       = row_y + (64 - txt_block_h) / 2;
+    draw_txt(font_header, tr("AppTitle"),      txt_x, txt_y,                                  cfg.theme.text);
+    draw_txt(font_footer, "v" VTREE_VERSION,   txt_x, txt_y + cfg.font_size_header + 4,       cfg.theme.link);
 
     int ty = my + hh + 14;
     draw_txt_clipped(font_menu, tr("About_Subtitle"), mx + 18, ty, mw - 36, cfg.theme.text);
@@ -1774,6 +1790,7 @@ int main(int argc, char *argv[]) {
         {&tex_viewer,    "res/viewer.png"},  {&tex_hexview,  "res/hexview.png"},
         {&tex_imgview,   "res/imgview.png"}, {&tex_fileinfo, "res/fileinfo.png"},
         {&tex_exec,      "res/exec.png"},
+        {&tex_logo,      "res/logo.png"},
     };
     int tex_ok = 0, tex_missing = 0;
     for (int i = 0; i < (int)(sizeof(tex_list)/sizeof(tex_list[0])); i++) {
@@ -2700,6 +2717,7 @@ int main(int argc, char *argv[]) {
     SDL_DestroyTexture(tex_rename); SDL_DestroyTexture(tex_delete);
     SDL_DestroyTexture(tex_settings); SDL_DestroyTexture(tex_exit);
     SDL_DestroyTexture(tex_newfile); SDL_DestroyTexture(tex_newfolder); SDL_DestroyTexture(tex_about);
+    SDL_DestroyTexture(tex_logo);
     SDL_DestroyTexture(tex_enterfol);
     SDL_DestroyTexture(tex_viewer); SDL_DestroyTexture(tex_hexview);
     SDL_DestroyTexture(tex_imgview); SDL_DestroyTexture(tex_fileinfo); SDL_DestroyTexture(tex_exec);
